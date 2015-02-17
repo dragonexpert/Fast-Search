@@ -24,7 +24,7 @@ function fastsearch_info()
 
 		"authorsite"		=> "",
 
-		"version"		=> "2.5",
+		"version"		=> "2.6",
 
 		"guid" 			=> "",
 
