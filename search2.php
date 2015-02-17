@@ -10,7 +10,7 @@ require_once MYBB_ROOT."inc/class_parser.php";
 
 $parser = new postParser;
 
-
+$mybb->input['sid'] = (string) $mybb->input['sid'];
 
 // Load global language phrases
 
@@ -240,7 +240,7 @@ if($mybb->input['action'] == "results")
 
 	{
 
-		$perpage = $mybb->settings['threadsperpage'];
+		$perpage = $mybb->settings['postsperpage'];
 
 	}
 
@@ -769,7 +769,6 @@ if($mybb->input['action'] == "results")
 
 	//	$pages = ceil($threadcount / $perpage);
 
-	
 
 		if($page>$pages)
 
@@ -1501,7 +1500,11 @@ if($mybb->input['action'] == "results")
 
 			$t_unapproved_where = 'visible < 1';
 
-		}	
+		}
+		if($mybb->user['ppp'] > $mybb->settings['searchhardlimit'])
+		{
+			$mybb->user['ppp'] = $mybb->settings['searchhardlimit'];
+		}
 
 		if($mybb->user['uid']==0)
 
@@ -1547,7 +1550,7 @@ if($mybb->input['action'] == "results")
 
 		}
 
-		$start = ($page -1 ) * $perpage;
+		$start = $page * $perpage - $perpage;
 
 		$end = $start + $perpage;
 
@@ -1557,9 +1560,9 @@ if($mybb->input['action'] == "results")
 
 		{
 
-			$post_cache_options['limit'] = intval($mybb->settings['searchhardlimit']);
+			//$post_cache_options['limit'] = $perpage;
 
-			$post_cache_options['limit_start'] = $page * $perpage - $perpage;
+			//$post_cache_options['limit_start'] = $page * $perpage - $perpage;
 
 		}
 
@@ -1575,8 +1578,6 @@ if($mybb->input['action'] == "results")
 
 		}
 
-
-
 		$tids = array();
 
 		$pids = array();
@@ -1586,9 +1587,8 @@ if($mybb->input['action'] == "results")
 		// This is the new query so it doesn't cache a million pids and tids it doesn't need to.
 
 		$query = $db->simple_select("posts", "pid, tid", "pid IN(".$db->escape_string($search['posts']).") AND {$p_unapproved_where}", $post_cache_options);
-
 		$zzz = $start;
-
+		$counter = 1;
 		while($post = $db->fetch_array($query))
 
 		{
@@ -1600,17 +1600,16 @@ if($mybb->input['action'] == "results")
 					break;
 
 				}
-
-				$pids[$post['pid']] = $post['tid'];
-
-				$tids[$post['tid']][$post['pid']] = $post['pid'];
-
-				++$zzz;
+				if($counter >= $start)
+				{
+					$pids[$post['pid']] = $post['tid'];
+					$tids[$post['tid']][$post['pid']] = $post['pid'];
+					++$zzz;
+				}
+				++$counter;
 
 		}
-
 		if(!empty($pids))
-
 		{
 
 			$temp_pids = array();
@@ -1763,8 +1762,11 @@ if($mybb->input['action'] == "results")
 
 		} */
 
-		// Change limit to 100 in case bad search.
-
+		$start = $page * $perpage - $perpage;
+		if($start <0 )
+		{
+			$start = 0;
+		}
 		$query = $db->query("
 
 			SELECT p.*, u.username AS userusername, t.subject AS thread_subject, t.replies AS thread_replies, t.views AS thread_views, t.lastpost AS thread_lastpost, t.closed AS thread_closed, t.uid as thread_uid
@@ -1777,11 +1779,7 @@ if($mybb->input['action'] == "results")
 
 			WHERE p.pid IN (".$db->escape_string($search['posts']).")
 
-			ORDER BY $sortfield $order
-
-			LIMIT 100
-
-		");
+			ORDER BY $sortfield $order");
 
 		while($post = $db->fetch_array($query))
 
