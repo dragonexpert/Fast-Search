@@ -1,0 +1,15 @@
+Fast Search
+
+Fast Search is designed to greatly improve the speed of your searches.  It does this by eliminating the memory eating processes
+that the default search system uses.
+
+Installation:
+Upload search2.php to your forum root.
+Upload /inc/plugins/fastsearch.php to your /inc/plugins folder.
+Activate in the Admin CP
+
+Upgrading:
+Simply Replace the files of the old version with the new version.
+
+Suggestions:
+Please create an issue on Github.
