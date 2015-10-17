@@ -24,26 +24,20 @@ if($mybb->usergroup['cansearch'] == 0)
 	error_no_permission();
 }
 
-$now = TIME_NOW;
-$mybb->input['keywords'] = trim($mybb->input['keywords']);
-
-$limitsql = "";
-if(intval($mybb->settings['searchhardlimit']) > 0)
+// Check if a hard limit exists.  If not, set to 1000.
+if(!$mybb->settings['searchhardlimit'] || $mybb->settings['searchhardlimit'] < 1)
 {
-	$limitsql = "ORDER BY t.dateline DESC LIMIT ".intval($mybb->settings['searchhardlimit']);
+    $mybb->settings['searchhardlimit'] = 1000;
 }
+
+$now = TIME_NOW;
 
 if($mybb->input['action'] == "results")
 {
-    if(is_array($mybb->input['sid'])) // Fixes issue regarding using sid[]
-    {
-        error($lang->error_nosearchresults);
-    }
-	$sid = $db->escape_string($mybb->input['sid']);
-	$query = $db->simple_select("searchlog", "*", "sid='$sid'");
+    $sid = $mybb->get_input("sid");
+    $query = $db->simple_select("searchlog", "*", "sid='$sid'");
 	$search = $db->fetch_array($query);
-
-	if(!$search['sid'])
+    if(!$search['sid'])
 	{
 		error($lang->error_invalidsearch);
 	}
@@ -53,8 +47,7 @@ if($mybb->input['action'] == "results")
 	// Decide on our sorting fields and sorting order.
 	$order = my_strtolower(htmlspecialchars($mybb->input['order']));
 	$sortby = my_strtolower(htmlspecialchars($mybb->input['sortby']));
-
-	switch($sortby)
+    switch($sortby)
 	{
 		case "replies":
 			$sortfield = "t.replies";
@@ -99,8 +92,8 @@ if($mybb->input['action'] == "results")
 			}
 			break;
 	}
-	
-	if($order != "asc")
+
+    if($order != "asc")
 	{
 		$order = "desc";
 		$oppsortnext = "asc";
@@ -115,92 +108,49 @@ if($mybb->input['action'] == "results")
 	{
 		$mybb->settings['threadsperpage'] = 20;
 	}
+    if($search['resulttype'] == "threads")
+    {
+        if(!$mybb->user['tpp'])
+        {
+            $perpage = $mybb->settings['threadsperpage'];
+        }
+        else
+        {
+            $perpage = $mybb->user['tpp'];
+        }
+    }
+    else
+    {
+        if(!$mybb->user['ppp'])
+        {
+            $perpage = $mybb->settings['postsperpage'];
+        }
+        else
+        {
+            $perpage = $mybb->user['ppp'];
+        }
+    }
+    if(!$perpage) // Provide a fallback
+    {
+        $perpage = 20;
+    }
+    // Figure out the current page
+    if(!$mybb->input['page']|| $mybb->input['page'] <1)
+    {
+        $page = 1;
+    }
+    else
+    {
+        $page = (int) $mybb->input['page'];
+    }
 
-	// Work out pagination, which page we're at, as well as the limits.
-	if(!$mybb->user['ppp'])
-	{
-		$perpage = $mybb->settings['threadsperpage'];
-	}
-	else
-	{
-		$perpage = $mybb->user['ppp'];
-	}
-	$page = intval($mybb->input['page']);
-	if($page > 0)
-	{
-		$start = ($page-1) * $perpage;
-	}
-	else
-	{
-		$start = 0;
-		$page = 1;
-	}
-	$end = $start + $perpage;
-	$lower = $start+1;
-	$upper = $end;
-	
-	// Work out if we have terms to highlight
-	$highlight = "";
-	if($search['keywords'])
-	{
-		if($mybb->settings['seourls'] == "yes" || ($mybb->settings['seourls'] == "auto" && $_SERVER['SEO_SUPPORT'] == 1))
-		{
-			$highlight = "?highlight=".urlencode($search['keywords']);
-		}
-		else
-		{
-			$highlight = "&amp;highlight=".urlencode($search['keywords']);
-		}
-	}
-
-	$sorturl = "search.php?action=results&amp;sid={$sid}";
+    $sorturl = "search.php?action=results&amp;sid={$sid}";
 	$thread_url = "";
 	$post_url = "";
 	
 	eval("\$orderarrow['$sortby'] = \"".$templates->get("search_orderarrow")."\";");
 
-	// Read some caches we will be using
-	$forumcache = $cache->read("forums");
-	$icon_cache = $cache->read("posticons");
-
-	$threads = array();
-
-/*	if($mybb->user['uid'] == 0)
-	{
-		// Build a forum cache.
-		$query = $db->query("
-			SELECT fid
-			FROM ".TABLE_PREFIX."forums
-			WHERE active != 0
-			ORDER BY pid, disporder
-		");
-		
-		$forumsread = my_unserialize($mybb->cookies['mybb']['forumread']);
-	}
-	else
-	{
-		// Build a forum cache.
-		$query = $db->query("
-			SELECT f.fid, fr.dateline AS lastread
-			FROM ".TABLE_PREFIX."forums f
-			LEFT JOIN ".TABLE_PREFIX."forumsread fr ON (fr.fid=f.fid AND fr.uid='{$mybb->user['uid']}')
-			WHERE f.active != 0
-			ORDER BY pid, disporder
-		");
-	} */
-
-/*	while($forum = $db->fetch_array($query))
-	{
-		if($mybb->user['uid'] == 0)
-		{
-			if($forumsread[$forum['fid']])
-			{
-				$forum['lastread'] = $forumsread[$forum['fid']];
-			}
-		}
-		$readforums[$forum['fid']] = $forum['lastread'];
-	} */
-	$fpermissions = forum_permissions();
+    $fpermissions = forum_permissions();
 	
 	// Inline Mod Column for moderators
 	$inlinemodcol = $inlinecookie = '';
@@ -218,201 +168,66 @@ if($mybb->input['action'] == "results")
 		$return_url = 'search.php?'.htmlspecialchars_uni($_SERVER['QUERY_STRING']);
 	}
 
-	// Show search results as 'threads'
-	if($search['resulttype'] == "threads")
-	{
-		$threadcount = 0;
-		
-		// Moderators can view unapproved threads
-		$query = $db->simple_select("moderators", "fid", "(id='{$mybb->user['uid']}' AND isgroup='0') OR (id='{$mybb->user['usergroup']}' AND isgroup='1')");
-		if($mybb->usergroup['issupermod'] == 1)
-		{
-			// Super moderators (and admins)
-			$unapproved_where = "t.visible >= 0";
-		}
-	/*	elseif($db->num_rows($query))
-		{
-			// Normal moderators
-			$moderated_forums = '0';
-			while($forum = $db->fetch_array($query))
-			{
-				$moderated_forums .= ','.$forum['fid'];
-			}
-			$unapproved_where = "(t.visible>0 OR (t.visible=0 AND t.fid IN ({$moderated_forums})))";
-		} */
-		else
-		{
-			// Normal users
-			$unapproved_where = 't.visible>0';
-		}
-		
-		// If we have saved WHERE conditions, execute them
-		if($search['querycache'] != "")
-		{
-			$where_conditions = $search['querycache'];
-			$page = intval($mybb->input['page']);
-			if(!$page)
-			{
-				$page = 1;
-			}
-			if($page<1)
-			{
-				$page = 1;
-			}
-			// build a count query.
-			$query = $db->query("SELECT COUNT(t.tid) as threadtotal FROM " . TABLE_PREFIX . "threads t WHERE $where_conditions AND {$unapproved_where} AND t.moved = 0 {$limitsql}");
-			$threadtotal = $db->fetch_field($query, "threadtotal");
-            if(!$search['threads'])
-            {
-                // build a list since there isn't one.
-                $tidquery = $db->simple_select("threads t", "tid", $where_conditions . " AND $unapproved_where AND t.moved = 0");
-                if($db->num_rows($tidquery) == 0)
-                {
-                    error($lang->error_nosearchresults);
-                }
+    if($search['resulttype'] == "threads")
+    {
+        $threads = array();
+        $threadcount = 0;
+        if($mybb->usergroup['issupermod'])
+        {
+            $visible = 0;
+        }
+        else
+        {
+            $visible = 1;
+        }
 
-                while($results = $db->fetch_array($tidquery))
-                {
-                    if($search['threads'])
-                    {
-                        $search['threads'] .= ",";
-                    }
-                    $search['threads'] .= $results['tid'];
-                }
-            }
-			$pages = ceil($threadtotal / $perpage);
-			if($page>$pages)
-			{
-				$page = $pages;
-				$mybb->input['page'] = $pages;
-			}
+        $limitsql = "LIMIT " . $mybb->settings['searchhardlimit'];
+        $unsearchableforums = get_unsearchable_forums();
+        if($unsearchableforums)
+        {
+            $unsearchsql = " AND t.fid NOT IN(" . $unsearchableforums . ") ";
+        }
+        if($search['querycache'] != "") // Storing a query in the table
+        {
+            // Count and cache the threads
+            $query = $db->simple_select("threads t", "tid", $search['querycache'] . " AND t.visible >= $visible $unsearchsql AND t.moved=0 ORDER BY $sortfield $order $limitsql");
+        }
+        else
+        {
+            // Results stored in table
+            $query = $db->simple_select("threads t", "tid", "t.tid IN(" . $search['threads'] . ") AND t.visible >= $visible $unsearchsql AND t.moved=0 ORDER BY $sortfield $order $limitsql");
+        }
+        while($thread = $db->fetch_array($query))
+        {
+            $threads[] = $thread['tid'];
+        }
+        if($db->num_rows($query) == 0)
+        {
+            error($lang->error_nosearchresults);
+        }
+        // Count the array to figure out how many results.
+        $total = count($threads);
+        $pages = ceil($total / $perpage);
+        if($page > $pages)
+        {
+            $page = $pages;
+        }
+        $mybb->input['page'] = $page;
 
-			// Now deal with the list of threads.
-			$threadarray = explode(",", $search['threads']);
-			$threadarraystart = $page * $perpage - $perpage;
-			$threadarrayend = $page * $perpage;
-			$loop = 1;
-			// This is the fastest way to get the relevant tids
-			$tidlist = implode(",", array_slice($threadarray, $threadarraystart, $perpage));
-			$start = $page * $perpage - $perpage;
-			if($start<0)
-			{
-				$start = 0;
-			}
 
-			$threadcount = $threadtotal;
-			if($threadcount > 0)
-			{
-                if(!$search['threads'])
-                {
-			        $search['threads'] = implode(",", $threads);
-                }
-			}
-			// No results.
-			else
-			{
-				error($lang->error_nosearchresults);
-			}
-			$threadcount = $threadtotal;
-			$original_conditions = $where_conditions;
-			$where_conditions = "t.tid IN (".$tidlist.")";
-		}
-		// This search doesn't use a query cache, results stored in search table.
-		else
-		{
-			$where_conditions = "t.tid IN (".$search['threads'].")";
-			if(!$original_conditions)
-			{
-				$original_conditions = $where_conditions;
-			}
-			$query = $db->simple_select("threads t", "COUNT(t.tid) AS resultcount", $where_conditions. " AND {$unapproved_where} AND t.moved = 0 {$limitsql}");
-			$count = $db->fetch_array($query);
+        $threadarraystart = $page * $perpage - $perpage;
+        $threadarray = array_slice($threads, $threadarraystart, $perpage);
+        $tidlist = implode(",", $threadarray);
 
-			if(!$count['resultcount'])
-			{
-				error($lang->error_nosearchresults);
-			}
-			$threadcount = $count['resultcount'];
-			$pages = ceil($threadcount / $perpage);
-			if($page>$pages) // Help in case they go too far.
-			{
-				$page = $pages;
-				$mybb->input['page'] = $pages;
-			}
-		}
-		
-		$permsql = "";
-		$onlyusfids = array();
-		
-		// Check group permissions if we can't view threads not started by us
-		$group_permissions = forum_permissions();
-		foreach($group_permissions as $fid => $forum_permissions)
-		{
-			if($forum_permissions['canonlyviewownthreads'] == 1)
-			{
-				$onlyusfids[] = $fid;
-			}
-		}
-		if(!empty($onlyusfids))
-		{
-			$permsql .= "AND ((t.fid IN(".implode(',', $onlyusfids).") AND t.uid='{$mybb->user['uid']}') OR t.fid NOT IN(".implode(',', $onlyusfids)."))";
-		}
-	
-		$unsearchforums = get_unsearchable_forums();
-		if($unsearchforums)
-		{
-			$permsql .= " AND t.fid NOT IN ($unsearchforums)";
-		}
-		
-		// Begin selecting matching threads, cache them.
-		$sqlarray = array(
-			'order_by' => $sortfield,
-			'order_dir' => $order,
-			'limit_start' => $start,
-			'limit' => $perpage
-		);
-		$page = intval($mybb->input['page']);
-		if(!$page)
-		{
-			$page = 1;
-		}
-		if($page<1)
-		{
-			$page = 1;
-		}
-
-		// Awesome Counter.  Oops that's a miss.
-	//	$query = $db->query("SELECT COUNT(t.tid) as threadcount FROM " . TABLE_PREFIX . "threads t WHERE $original_conditions AND {$unapproved_where} {$permsql} AND t.moved = 0 {$limitsql}");
-	//	$threadcount = $db->fetch_field($query, "threadcount");
-	//	$pages = ceil($threadcount / $perpage);
-	
-		if($page>$pages)
-		{
-			$page = $pages;
-			$mybb->input['page'] = $pages;
-		}
-
-			$threadarray = explode(",", $search['threads']);
-			$threadarraystart = $page * $perpage - $perpage;
-			$threadarrayend = $page * $perpage;
-			$loop = 1;
-			$tidlist = implode(",", array_slice($threadarray, $threadarraystart, $perpage));
-
-		$start = $page * $perpage - $perpage;
-		if($start<0)
-		{
-			$start = 0;
-		}
-        // New in 3.0: remove LIMIT $perpage because this should already be set
-		$query = $db->query("
+        $query = $db->query("
 			SELECT t.*, u.username AS userusername, p.displaystyle AS threadprefix
 			FROM ".TABLE_PREFIX."threads t
 			LEFT JOIN ".TABLE_PREFIX."users u ON (u.uid=t.uid)
 			LEFT JOIN ".TABLE_PREFIX."threadprefixes p ON (p.pid=t.prefix)
 			WHERE t.tid IN(" . $tidlist . ")
-			ORDER BY $sortfield $order
-		");
-		$thread_cache = array();
+			ORDER BY $sortfield $order");
+
+        $thread_cache = array();
 		while($thread = $db->fetch_array($query))
 		{
 			$thread_cache[$thread['tid']] = $thread;
@@ -429,7 +244,7 @@ if($mybb->input['action'] == "results")
 			$mybb->settings['maxmultipagelinks'] = 5;
 		}
 
-		foreach($thread_cache as $thread)
+        foreach($thread_cache as $thread)
 		{
 			$bgcolor = alt_trow();
 			$folder = '';
@@ -674,10 +489,10 @@ if($mybb->input['action'] == "results")
 			}
 		}
 
-		$multipage = multipage($threadcount, $perpage, $page, "search.php?action=results&amp;sid=$sid&amp;sortby=$sortby&amp;order=$order&amp;uid=".$mybb->input['uid']);
-		if($upper > $threadcount)
+		$multipage = multipage($total, $perpage, $page, "search.php?action=results&amp;sid=$sid&amp;sortby=$sortby&amp;order=$order&amp;uid=".$mybb->input['uid']);
+		if($upper > $total)
 		{
-			$upper = $threadcount;
+			$upper = $total;
 		}
 		
 		// Inline Thread Moderation Options
@@ -716,183 +531,80 @@ if($mybb->input['action'] == "results")
 		
 		eval("\$searchresults = \"".$templates->get("search_results_threads")."\";");
 		output_page($searchresults);
+
+    } // End results shown as threads
+    if($search['resulttype'] == "posts")
+    {
+        if(!$search['posts'])
+		{
+			error($lang->error_nosearchresults);
+		}
+
+        $limitsql = "LIMIT " . $mybb->settings['searchhardlimit'];
+
+        if($mybb->usergroup['issupermod'])
+        {
+            $visible = 0;
+        }
+        else
+        {
+            $visible = 1;
+        }
+
+        $postarray = array();   $threadarray = array();
+        $unsearchableforums = get_unsearchable_forums();
+        if($unsearchableforums)
+        {
+            $unsearchsql = " AND t.fid NOT IN(" . $unsearchableforums . ") ";
+        }
+
+        if($search['querycache'] != "")
+        {
+            $querycache = " AND " . $search['querycache'];
+        
+
+
+        	$query = $db->query("SELECT p.pid, t.tid FROM " . TABLE_PREFIX . "posts p
+        	LEFT JOIN " . TABLE_PREFIX . "threads t ON(p.tid=t.tid)
+        	WHERE p.visible >= $visible AND t.visible >= $visible $unsearchsql AND t.moved = 0 $querycache ORDER BY $sortfield $order $limitsql");
 	}
-	else // Displaying results as posts
+	else
 	{
-		if(!$search['posts'])
-		{
-			error($lang->error_nosearchresults);
-		}
-		
-		$postcount = 0;
-		
-		// Moderators can view unapproved threads
-		$query = $db->simple_select("moderators", "fid", "(id='{$mybb->user['uid']}' AND isgroup='0') OR (id='{$mybb->user['usergroup']}' AND isgroup='1')");
-		if($mybb->usergroup['issupermod'] == 1)
-		{
-			// Super moderators (and admins)
-			$p_unapproved_where = "visible >= 0";
-			$t_unapproved_where = "visible < 0";
-		}
-	/*	elseif($db->num_rows($query))
-		{
-			// Normal moderators
-			$moderated_forums = '0';
-			while($forum = $db->fetch_array($query))
-			{
-				$moderated_forums .= ','.$forum['fid'];
-				$test_moderated_forums[$forum['fid']] = $forum['fid'];
-			}
-			$p_unapproved_where = "visible >= 0";
-			$t_unapproved_where = "visible < 0 AND fid NOT IN ({$moderated_forums})";
-		} */
-		else
-		{
-			// Normal users
-			$p_unapproved_where = 'visible=1';
-			$t_unapproved_where = 'visible < 1';
-		}	
-		if($mybb->user['uid']==0)
-		{
-			$mybb->user['ppp'] = 20;
-		}
-		$perpage = $mybb->user['ppp'];
-		if($mybb->user['ppp']==0)
-		{
-			$perpage = $mybb->settings['postsperpage'];
-			$mybb->user['ppp'] = $perpage;
-		}
-		if(isset($mybb->input['page']))
-		{
-			$page = intval($mybb->input['page']);
-		}
-		else
-		{
-			$page = 1;
-		}
-		if($page<1)
-		{
-			$page = 1;
-		}
-		$start = ($page -1 ) * $perpage;
-		$end = $start + $perpage;
-		$post_cache_options = array();
-		if(intval($mybb->settings['searchhardlimit']) > 0)
-		{
-			$post_cache_options['limit'] = intval($mybb->settings['searchhardlimit']);
-			$post_cache_options['limit_start'] = $page * $perpage - $perpage;
-		}
-		
-		if(strpos($sortfield, 'p.') !== false)
-		{
-			$post_cache_options['order_by'] = str_replace('p.', '', $sortfield);
-			$post_cache_options['order_dir'] = $order;
-		}
+		$query = $db->query("SELECT p.pid, t.tid FROM " . TABLE_PREFIX . "posts p
+	        LEFT JOIN " . TABLE_PREFIX . "threads t ON(p.tid=t.tid)
+        	WHERE p.visible >= $visible AND t.visible >= $visible $unsearchsql AND t.moved = 0 AND p.pid IN(" . $search['posts'] . ") ORDER BY $sortfield $order $limitsql");
+	}
 
-		$tids = array();
-		$pids = array();
-		// Make sure the posts we're viewing we have permission to view.
-		// This is the new query so it doesn't cache a million pids and tids it doesn't need to.
-		$query = $db->simple_select("posts", "pid, tid", "pid IN(".$db->escape_string($search['posts']).") AND {$p_unapproved_where}", $post_cache_options);
-		$zzz = $start;
-		while($post = $db->fetch_array($query))
-		{
-				if($zzz>$end)
-				{
-					break;
-				}
-				$pids[$post['pid']] = $post['tid'];
-				$tids[$post['tid']][$post['pid']] = $post['pid'];
-				++$zzz;
-		}
-		if(!empty($pids))
-		{
-			$temp_pids = array();
+        while($post = $db->fetch_array($query))
+        {
+            $postarray[] = $post['pid'];
+            $threadarray[] = $post['tid'];
+        }
+        if($db->num_rows($query) == 0)
+        {
+            error($lang->error_nosearchresults);
+        }
 
-			// Check the thread records as well. If we don't have permissions, remove them from the listing.
-			$query = $db->simple_select("threads", "tid", "tid IN(".$db->escape_string(implode(',', $pids)).") AND {$t_unapproved_where}");
-			while($thread = $db->fetch_array($query))
-			{
-				if(array_key_exists($thread['tid'], $tids) != false)
-				{
-					$temp_pids = $tids[$thread['tid']];
-					foreach($temp_pids as $pid)
-					{
-						unset($pids[$pid]);
-						unset($tids[$thread['tid']]);
-					}
-				}
-			}
-            $query = $db->simple_select("threads", "tid", "tid IN(".$db->escape_string(implode(',',$pids)).") AND visible = 1 AND moved != 0");
-            while($thread = $db->fetch_array($query))
-			{
-				if(array_key_exists($thread['tid'], $tids) != false)
-				{
-					$temp_pids = $tids[$thread['tid']];
-					foreach($temp_pids as $pid)
-					{
-						unset($pids[$pid]);
-						unset($tids[$thread['tid']]);
-					}
-				}
-			}
-			unset($temp_pids);
-		}
+        $total = count($postarray);
+        $pages = ceil($total / $perpage);
+        if($page > $pages)
+        {
+            $page = $pages;
+        }
+        $postarraystart = $page * $perpage - $perpage;
 
-		if($search['querycache'] != "")
-		{
-			$where_conditions = $search['querycache'];
-			$query = $db->query("SELECT COUNT(tid) AS resultcount FROM ".TABLE_PREFIX."threads WHERE $where_conditions");
-			$postcount = $db->fetch_field($query, "resultcount");
-		}
-		else
-		{
-			$query = $db->simple_select("posts", "pid, tid", "pid IN(".$db->escape_string($search['posts']).") AND {$p_unapproved_where}");
-			$postcount = $db->num_rows($query);
-		}
-		
-		if(!$postcount)
-		{
-			error($lang->error_nosearchresults);
-		}
-		
-		// And now we have our sanatized post list
-		$search['posts'] = implode(',', array_keys($pids));
-		
-		$tids = implode(",", array_keys($tids));
-		
-		// Read threads
-		// Killing for performance
-	/*	if($mybb->user['uid'] && $mybb->settings['threadreadcut'] > 0)
-		{
-			$query = $db->simple_select("threadsread", "tid, dateline", "uid='".$mybb->user['uid']."' AND tid IN(".$db->escape_string($tids).")");
-			while($readthread = $db->fetch_array($query))
-			{
-				$readthreads[$readthread['tid']] = $readthread['dateline'];
-			}
-		} */
+        $posts = array_slice($postarray, $postarraystart, $perpage);
+        $pidlist = implode(",", $posts);
+        $multipage = multipage($total, $perpage, $page, "search.php?action=results&amp;sid=".htmlspecialchars_uni($mybb->input['sid'])."&amp;sortby=$sortby&amp;order=$order&amp;uid=".$mybb->input['uid']);
 
-		$dot_icon = array();
-		// Killing because performance matters more than a thread icon
-	/*	if($mybb->settings['dotfolders'] != 0 && $mybb->user['uid'] != 0)
-		{
-			$query = $db->simple_select("posts", "DISTINCT tid,uid", "uid='".$mybb->user['uid']."' AND tid IN(".$db->escape_string($tids).")");
-			while($post = $db->fetch_array($query))
-			{
-				$dot_icon[$post['tid']] = true;
-			}
-		} */
-		// Change limit to 100 in case bad search.
-		$query = $db->query("
+        $query = $db->query("
 			SELECT p.*, u.username AS userusername, t.subject AS thread_subject, t.replies AS thread_replies, t.views AS thread_views, t.lastpost AS thread_lastpost, t.closed AS thread_closed, t.uid as thread_uid
 			FROM ".TABLE_PREFIX."posts p
 			LEFT JOIN ".TABLE_PREFIX."threads t ON (t.tid=p.tid)
 			LEFT JOIN ".TABLE_PREFIX."users u ON (u.uid=p.uid)
-			WHERE p.pid IN (".$db->escape_string($search['posts']).")
-			ORDER BY $sortfield $order
-			LIMIT 100
-		");
-		while($post = $db->fetch_array($query))
+			WHERE p.pid IN ($pidlist)
+			ORDER BY $sortfield $order");
+        while($post = $db->fetch_array($query))
 		{
 			$bgcolor = alt_trow();
 			if(!$post['visible'])
@@ -1077,10 +789,9 @@ if($mybb->input['action'] == "results")
 		{
 			error($lang->error_nosearchresults);
 		}
-		$multipage = multipage($postcount, $perpage, $page, "search.php?action=results&amp;sid=".htmlspecialchars_uni($mybb->input['sid'])."&amp;sortby=$sortby&amp;order=$order&amp;uid=".$mybb->input['uid']);
-		if($upper > $postcount)
+		if($upper > $total)
 		{
-			$upper = $postcount;
+			$upper = $total;
 		}
 		
 		// Inline Post Moderation Options
@@ -1120,8 +831,8 @@ if($mybb->input['action'] == "results")
 
 		eval("\$searchresults = \"".$templates->get("search_results_posts")."\";");
 		output_page($searchresults);
-	}
-}
+	} // End post results
+} // End action = results
 elseif($mybb->input['action'] == "findguest")
 {
 	$where_sql = "uid='0'";
@@ -1201,8 +912,8 @@ elseif($mybb->input['action'] == "findguest")
 }
 elseif($mybb->input['action'] == "finduser")
 {
-	$where_sql = "uid='".intval($mybb->input['uid'])."'";
-	
+	$where_sql = "uid='".$mybb->get_input('uid', MyBB::INPUT_INT)."'";
+
 	$unsearchforums = get_unsearchable_forums();
 	if($unsearchforums)
 	{
@@ -1213,7 +924,7 @@ elseif($mybb->input['action'] == "finduser")
 	{
 		$where_sql .= " AND fid NOT IN ($inactiveforums)";
 	}
-	
+
 	$permsql = "";
 	$onlyusfids = array();
 
@@ -1221,7 +932,7 @@ elseif($mybb->input['action'] == "finduser")
 	$group_permissions = forum_permissions();
 	foreach($group_permissions as $fid => $forum_permissions)
 	{
-		if($forum_permissions['canonlyviewownthreads'] == 1)
+		if(isset($forum_permissions['canonlyviewownthreads']) && $forum_permissions['canonlyviewownthreads'] == 1)
 		{
 			$onlyusfids[] = $fid;
 		}
@@ -1239,7 +950,7 @@ elseif($mybb->input['action'] == "finduser")
 	// Do we have a hard search limit?
 	if($mybb->settings['searchhardlimit'] > 0)
 	{
-		$options['limit'] = intval($mybb->settings['searchhardlimit']);
+		$options['limit'] = (int)$mybb->settings['searchhardlimit'];
 	}
 
 	$pids = '';
@@ -1253,33 +964,28 @@ elseif($mybb->input['action'] == "finduser")
 
 	$tids = '';
 	$comma = '';
-	$query = $db->simple_select("threads", "tid", $where_sql . " AND moved = 0 ");
+	$query = $db->simple_select("threads", "tid", $where_sql);
 	while($tid = $db->fetch_field($query, "tid"))
 	{
 			$tids .= $comma.$tid;
 			$comma = ',';
 	}
 
-	$sid = md5(uniqid(microtime(), 1));
-$tuid = "";
-if($mybb->input['uid'])
-{
-	$tuid = intval($mybb->input['uid']);
-}
+	$sid = md5(uniqid(microtime(), true));
 	$searcharray = array(
 		"sid" => $db->escape_string($sid),
 		"uid" => $mybb->user['uid'],
 		"dateline" => TIME_NOW,
-		"ipaddress" => $db->escape_string($session->ipaddress),
+		"ipaddress" => $db->escape_binary($session->packedip),
 		"threads" => $db->escape_string($tids),
 		"posts" => $db->escape_string($pids),
 		"resulttype" => "posts",
-		"querycache" => "",
+		"querycache" => 'p.uid=' . $mybb->get_input("uid", MyBB::INPUT_INT),
 		"keywords" => ''
 	);
 	$plugins->run_hooks("search_do_search_process");
 	$db->insert_query("searchlog", $searcharray);
-	redirect("search.php?action=results&sid=".$sid."&uid=$tuid", $lang->redirect_searchresults);
+	redirect("search.php?action=results&sid=".$sid, $lang->redirect_searchresults);
 }
 elseif($mybb->input['action'] == "finduserthreads")
 {
@@ -1483,7 +1189,7 @@ elseif($mybb->input['action'] == "do_search" && $mybb->request_method == "post")
 		}
 		else
 		{
-			$conditions = "uid='0' AND ipaddress='".$db->escape_string($session->ipaddress)."'";
+			$conditions = "uid='0' AND ipaddress=".$db->escape_binary($session->packedip);
 		}
 		$timecut = TIME_NOW-$mybb->settings['searchfloodtime'];
 		$query = $db->simple_select("searchlog", "*", "$conditions AND dateline > '$timecut'", array('order_by' => "dateline", 'order_dir' => "DESC"));
@@ -1503,7 +1209,7 @@ elseif($mybb->input['action'] == "do_search" && $mybb->request_method == "post")
 			error($lang->error_searchflooding);
 		}
 	}
-	if($mybb->input['showresults'] == "threads")
+	if($mybb->get_input('showresults') == "threads")
 	{
 		$resulttype = "threads";
 	}
@@ -1514,60 +1220,25 @@ elseif($mybb->input['action'] == "do_search" && $mybb->request_method == "post")
 
 	$search_data = array(
 		"keywords" => $mybb->input['keywords'],
-		"author" => $mybb->input['author'],
-		"postthread" => $mybb->input['postthread'],
-		"matchusername" => $mybb->input['matchusername'],
-		"postdate" => $mybb->input['postdate'],
-		"pddir" => $mybb->input['pddir'],
+		"author" => $mybb->get_input('author'),
+		"postthread" => $mybb->get_input('postthread', MyBB::INPUT_INT),
+		"matchusername" => $mybb->get_input('matchusername', MyBB::INPUT_INT),
+		"postdate" => $mybb->get_input('postdate', MyBB::INPUT_INT),
+		"pddir" => $mybb->get_input('pddir', MyBB::INPUT_INT),
 		"forums" => $mybb->input['forums'],
-		"findthreadst" => $mybb->input['findthreadst'],
-		"numreplies" => $mybb->input['numreplies'],
-		"threadprefix" => $mybb->input['threadprefix']
+		"findthreadst" => $mybb->get_input('findthreadst', MyBB::INPUT_INT),
+		"numreplies" => $mybb->get_input('numreplies', MyBB::INPUT_INT),
+		"threadprefix" => $mybb->get_input('threadprefix', MyBB::INPUT_ARRAY)
 	);
-	
+
 	if(is_moderator() && !empty($mybb->input['visible']))
 	{
-		if($mybb->input['visible'] == 1)
-		{
-			$search_data['visible'] = 1;
-		}
-		else
-		{
-			$search_data['visible'] = 0;
-		}
+		$search_data['visible'] = $mybb->get_input('visible', MyBB::INPUT_INT);
 	}
+
 
 	if($db->can_search == true)
 	{
-        if(!$mybb->settings['fastsearchcache'])
-        {
-            // 15 minutes
-            $mybb->settings['fastsearchcache'] = 15;
-        }
-        $cutoff = TIME_NOW - 60 * $mybb->settings['fastsearchcache'];
-        $wheresql = " AND keywords='" . $search_data['keywords'] . "' ";
-        if($search_data['matchusername'])
-        {
-            $wheresql .= " AND username='" . $search_data['author'];
-        }
-        // New in 3.0 using cache
-        $quickquery = $db->simple_select("searchlog", "sid", "dateline>$cutoff AND keywords='" . $db->escape_string($search_data['keywords']) . "'");
-        $sid = $db->fetch_field($quickquery, "sid");
-        if($sid)
-        {
-            $sortby = htmlspecialchars($mybb->input['sortby']);
-            if(my_strtolower($mybb->input['sortordr']) == "asc" || my_strtolower($mybb->input['sortordr'] == "desc"))
-	        {
-		        $sortorder = $mybb->input['sortordr'];
-	        }
-	        else
-	        {
-		        $sortorder = "desc";
-	        }
-            redirect("search.php?action=results&sid=$sid&sortby=$sortby&order=$sortorder", $lang->redirect_searchresults);
-            exit;
-        }
-
 		if($mybb->settings['searchtype'] == "fulltext" && $db->supports_fulltext_boolean("posts") && $db->is_fulltext("posts"))
 		{
 			$search_results = perform_search_mysql_ft($search_data);
@@ -1581,12 +1252,14 @@ elseif($mybb->input['action'] == "do_search" && $mybb->request_method == "post")
 	{
 		error($lang->error_no_search_support);
 	}
-	$sid = md5(uniqid(microtime(), 1));
+
+
+	$sid = md5(uniqid(microtime(), true));
 	$searcharray = array(
 		"sid" => $db->escape_string($sid),
 		"uid" => $mybb->user['uid'],
-		"dateline" => $now,
-		"ipaddress" => $db->escape_string($session->ipaddress),
+		"dateline" => TIME_NOW,
+		"ipaddress" => $db->escape_binary($session->packedip),
 		"threads" => $search_results['threads'],
 		"posts" => $search_results['posts'],
 		"resulttype" => $resulttype,
@@ -1597,17 +1270,22 @@ elseif($mybb->input['action'] == "do_search" && $mybb->request_method == "post")
 
 	$db->insert_query("searchlog", $searcharray);
 
-	if(my_strtolower($mybb->input['sortordr']) == "asc" || my_strtolower($mybb->input['sortordr'] == "desc"))
+	if(my_strtolower($mybb->get_input('sortordr')) == "asc" || my_strtolower($mybb->get_input('sortordr') == "desc"))
 	{
-		$sortorder = $mybb->input['sortordr'];
+		$sortorder = $mybb->get_input('sortordr');
 	}
 	else
 	{
 		$sortorder = "desc";
 	}
-	$sortby = htmlspecialchars($mybb->input['sortby']);
+	$sortby = htmlspecialchars_uni($mybb->get_input('sortby'));
+	if(!$sortby)
+	{
+		$sortby = "dateline";
+	}
 	$plugins->run_hooks("search_do_search_end");
 	redirect("search.php?action=results&sid=".$sid."&sortby=".$sortby."&order=".$sortorder, $lang->redirect_searchresults);
+
 }
 else if($mybb->input['action'] == "thread")
 {
@@ -1760,5 +1438,4 @@ else
 	eval("\$search = \"".$templates->get("search")."\";");
 	output_page($search);
 }    
-
 ?>
