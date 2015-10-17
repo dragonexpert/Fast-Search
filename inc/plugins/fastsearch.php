@@ -11,7 +11,7 @@ function fastsearch_info()
 		"website"		=> "",
 		"author"		=> "Mark Janssen",
 		"authorsite"		=> "",
-		"version"		=> "3.0",
+		"version"		=> "4.0",
 		"guid" 			=> "",
         "compatibility"	=> "16*,18*",
         "codename" => "fastsearch",
