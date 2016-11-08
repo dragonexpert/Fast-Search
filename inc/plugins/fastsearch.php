@@ -28,6 +28,12 @@ function fastsearch_install()
    // Not creating an index here because if the table is extremely large, it could time out.
 }
 
+function fastsearch_is_installed()
+{
+    global $db;
+    return $db->field_exists("moved", "threads");
+}
+
 function fastsearch_activate()
 {
     // Nothing is ok here
