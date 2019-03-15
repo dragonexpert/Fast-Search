@@ -134,7 +134,7 @@ function fastsearch_class_moderation_move_thread_redirect(&$arguments)
                 require_once MYBB_ROOT . "/inc/functions_rebuild.php";
 		        rebuild_forum_counters($new_fid);
                 rebuild_forum_counters($fid);
-                moderation_redirect(get_thread_link($tid), $lang->redirect_threadmoved);
+                redirect(get_thread_link($tid), $lang->redirect_threadmoved);
                 die;
 }
 
